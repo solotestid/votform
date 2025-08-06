@@ -1,0 +1,283 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model User {
+  id            String    @id @default(cuid())
+  name          String?
+  email         String    @unique
+  password      String?
+  emailVerified DateTime?
+  image         String?
+  phone         String?
+  phoneVerified Boolean   @default(false)
+  isAdmin       Boolean   @default(false)
+  isBlocked     Boolean   @default(false)
+  isSuspended   Boolean   @default(false)
+  deviceFingerprint String?
+  referralCode  String?   @unique
+  referredBy    String?
+  freeVoteCredits Int     @default(0)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  accounts      Account[]
+  sessions      Session[]
+  campaigns     Campaign[]
+  votes         Vote[]
+  referrals     User[]    @relation("UserReferrals")
+  referredByUser User?    @relation("UserReferrals", fields: [referredBy], references: [id])
+  suggestions   Suggestion[]
+  adminActions  AdminAction[]
+  campaignJoiners CampaignJoiner[]
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+model Campaign {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  category    String
+  minJoiners  Int
+  status      CampaignStatus @default(DRAFT)
+  createdBy   String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  expiresAt   DateTime?
+
+  user        User     @relation(fields: [createdBy], references: [id])
+  nominees    Nominee[]
+  suggestions Suggestion[]
+  contest     Contest?
+  joiners     CampaignJoiner[]
+
+  @@index([status])
+  @@index([category])
+}
+
+model CampaignJoiner {
+  id         String   @id @default(cuid())
+  campaignId String
+  userId     String
+  joinedAt   DateTime @default(now())
+
+  campaign   Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([campaignId, userId])
+}
+
+model Nominee {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  image       String?
+  campaignId  String
+  contestId   String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  campaign    Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  contest     Contest? @relation(fields: [contestId], references: [id])
+  votes       Vote[]
+  winners     Winner[]
+  prizeRecipient String?
+
+  @@index([contestId])
+}
+
+model Suggestion {
+  id          String   @id @default(cuid())
+  campaignId  String
+  userId      String
+  type        SuggestionType
+  content     String
+  status      SuggestionStatus @default(PENDING)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  campaign    Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Contest {
+  id          String   @id @default(cuid())
+  campaignId  String   @unique
+  name        String
+  description String?
+  category    String
+  status      ContestStatus @default(ACTIVE)
+  startDate   DateTime
+  endDate     DateTime
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  campaign    Campaign @relation(fields: [campaignId], references: [id])
+  nominees    Nominee[]
+  votes       Vote[]
+  winners     Winner[]
+
+  @@index([status])
+  @@index([startDate, endDate])
+}
+
+model Vote {
+  id        String   @id @default(cuid())
+  contestId String
+  nomineeId String
+  userId    String
+  type      VoteType
+  amount    Int      @default(1)
+  amountPaid Float?
+  createdAt DateTime @default(now())
+
+  contest   Contest  @relation(fields: [contestId], references: [id], onDelete: Cascade)
+  nominee   Nominee  @relation(fields: [nomineeId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([contestId, userId, type])
+  @@index([contestId, nomineeId])
+  @@index([type])
+}
+
+model Winner {
+  id        String   @id @default(cuid())
+  contestId String
+  nomineeId String
+  position  Int
+  voteCount Int
+  createdAt DateTime @default(now())
+
+  contest   Contest  @relation(fields: [contestId], references: [id], onDelete: Cascade)
+  nominee   Nominee  @relation(fields: [nomineeId], references: [id], onDelete: Cascade)
+
+  @@unique([contestId, position])
+}
+
+model AdminAction {
+  id          String        @id @default(cuid())
+  adminId     String
+  action      AdminActionType
+  targetType  String
+  targetId    String
+  details     String?
+  createdAt   DateTime      @default(now())
+
+  admin       User          @relation(fields: [adminId], references: [id], onDelete: Cascade)
+}
+
+model Payment {
+  id          String   @id @default(cuid())
+  userId      String
+  contestId   String
+  amount      Float
+  currency    String   @default("USD")
+  status      PaymentStatus @default(PENDING)
+  stripePaymentId String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([status])
+  @@index([userId])
+}
+
+enum CampaignStatus {
+  DRAFT
+  PENDING
+  ACTIVE
+  REJECTED
+  COMPLETED
+}
+
+enum ContestStatus {
+  ACTIVE
+  VOTING
+  ENDED
+  CANCELLED
+}
+
+enum VoteType {
+  FREE
+  PAID
+}
+
+enum SuggestionType {
+  NAME
+  DESCRIPTION
+  CATEGORY
+  NOMINEE
+  OTHER
+}
+
+enum SuggestionStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum PaymentStatus {
+  PENDING
+  COMPLETED
+  FAILED
+  REFUNDED
+}
+
+enum AdminActionType {
+  CREATE_CAMPAIGN
+  UPDATE_CAMPAIGN
+  DELETE_CAMPAIGN
+  CREATE_CONTEST
+  UPDATE_CONTEST
+  DELETE_CONTEST
+  BLOCK_USER
+  UNBLOCK_USER
+  SUSPEND_USER
+  UNSUSPEND_USER
+  DELETE_USER
+  VIEW_VOTES
+  EXPORT_DATA
+  APPROVE_CAMPAIGN
+  REJECT_CAMPAIGN
+} 
